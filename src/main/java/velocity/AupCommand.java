@@ -51,6 +51,13 @@ public class AupCommand implements SimpleCommand {
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         switch (sub) {
+            case "schedule":
+                source.sendMessage(info(common.ScheduleCommandSupport.execute(Arrays.copyOfRange(args, 1, args.length), cfgMgr, reloadAction)));
+                break;
+            case "discover":
+                common.DiscoveryCommandSupport.execute(Arrays.copyOfRange(args, 1, args.length), pluginUpdater,
+                        listFile, completionDispatcher, message -> source.sendMessage(info(message)));
+                break;
             case "download":
             case "update":
                 install(source, Arrays.copyOfRange(args, 1, args.length));
@@ -118,6 +125,8 @@ public class AupCommand implements SimpleCommand {
     }
 
     private void sendHelp(CommandSource source) {
+        source.sendMessage(info("/vaup schedule daily 04:00 16:00 | timezone Asia/Taipei | off | status"));
+        source.sendMessage(info("/vaup discover [apply] - 自動尋找更新來源（預覽／儲存）"));
         source.sendMessage(info("AutoUpdatePlugins Commands:"));
         source.sendMessage(info("/vaup update [plugin|group...]"));
         source.sendMessage(info("/vaup check [plugin|group...]"));
@@ -522,7 +531,7 @@ public class AupCommand implements SimpleCommand {
             return completions;
         }
         String[] args = invocation.arguments();
-        String[] subs = {"download", "update", "check", "pending", "log", "stop", "reload", "add", "remove", "list", "enable", "disable", "debug"};
+        String[] subs = {"schedule", "discover", "download", "update", "check", "pending", "log", "stop", "reload", "add", "remove", "list", "enable", "disable", "debug"};
         if (args.length == 0) {
             completions.addAll(Arrays.asList(subs));
             return completions;

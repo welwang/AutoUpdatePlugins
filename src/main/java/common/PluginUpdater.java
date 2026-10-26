@@ -62,6 +62,9 @@ public class PluginUpdater {
     private final ThreadLocal<ExecutionMode> executionMode = new ThreadLocal<>();
     private final ThreadLocal<RunCollector> runCollector = new ThreadLocal<>();
     private volatile ExecutorService currentExecutor;
+    private final AtomicBoolean discovering = new AtomicBoolean();
+    private volatile Thread discoveryThread;
+    private volatile boolean closed;
 
     private static final List<PendingMove> DEFERRED_MOVES = Collections.synchronizedList(new ArrayList<>());
     private static final AtomicBoolean DEFERRED_HOOK_REGISTERED = new AtomicBoolean(false);
@@ -366,6 +369,7 @@ public class PluginUpdater {
     }
 
     private void executeEntries(Map<String, String> links, String platform, String key, ExecutionMode mode, UpdateCompletionListener listener, RunCompletionListener runListener) {
+        if (closed) return;
         LinkedHashMap<String, String> orderedLinks = new LinkedHashMap<>();
         if (links != null) {
             orderedLinks.putAll(links);
@@ -553,6 +557,46 @@ public class PluginUpdater {
         LinkedHashMap<String, String> entries = new LinkedHashMap<>();
         entries.put(name, link);
         executeEntries(entries, platform, key, ExecutionMode.CHECK, null, null);
+    }
+
+    public java.util.List<String> discoverSources(File listFile, boolean apply) {
+        if (closed) return Collections.singletonList("插件已停止。");
+        if (!discovering.compareAndSet(false, true)) return Collections.singletonList("來源搜尋正在執行，請稍候。");
+        discoveryThread = Thread.currentThread();
+        Path plugins = UpdateOptions.filePath == null || UpdateOptions.filePath.trim().isEmpty()
+                ? dataFolder.toAbsolutePath().getParent() : Paths.get(UpdateOptions.filePath);
+        try {
+            return new SourceDiscovery().discover(plugins, listFile, apply);
+        } catch (IOException | RuntimeException error) {
+            return Collections.singletonList("來源搜尋失敗：" + error.getMessage());
+        } finally {
+            discoveryThread = null;
+            discovering.set(false);
+        }
+    }
+
+    public void discoverSourcesAsync(File listFile, boolean apply,
+                                    java.util.function.Consumer<java.util.List<String>> completion) {
+        Thread thread = new Thread(() -> completion.accept(discoverSources(listFile, apply)), "AutoUpdatePlugins-discovery");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    public void close() {
+        closed = true;
+        stopUpdates();
+        Thread thread = discoveryThread;
+        if (thread != null) thread.interrupt();
+    }
+
+    public void updateListWithDiscovery(File listFile, String platform, String key,
+                                        boolean discover, UpdateCompletionListener listener) {
+        if (closed) return;
+        if (!discover) { updateList(listFile, platform, key, listener); return; }
+        discoverSourcesAsync(listFile, true, lines -> {
+            if (!lines.isEmpty()) logger.info(lines.get(lines.size() - 1));
+            if (!closed) updateList(listFile, platform, key, listener);
+        });
     }
 
     public Map<String, PendingUpdate> getPendingUpdates() {
@@ -1316,6 +1360,16 @@ public class PluginUpdater {
             EntryOptions options = EntryOptions.parse(entry.getValue(), logger);
             logger.info(entry.getKey() + " ---- " + redactSourceForLog(options.sourceWithoutQuery));
             String customPath = options.customPath();
+            if (!options.bool("installMissing", UpdateOptions.installMissing)) {
+                if (!pluginDownloader.hasInstalledPlugin(entry.getKey(), customPath)) {
+                    clearPendingUpdate(entry.getKey());
+                    recordStatus(entry.getKey(), EntryResult.UNCHANGED);
+                    historyLogger.log(UpdateEvent.builder(UpdateEvent.Type.SKIPPED, entry.getKey())
+                            .reason("Plugin is absent; use ?installMissing=true for a new installation").build());
+                    logger.info("Skipping absent plugin " + entry.getKey() + "; it will not be reinstalled.");
+                    return true;
+                }
+            }
             String value = options.sourceValue != null ? options.sourceValue.trim() : "";
             if (value.isEmpty()) {
                 return false;

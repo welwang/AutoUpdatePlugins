@@ -9,15 +9,17 @@ updates:
   # Delay after server startup (seconds) before the first run. Default: 50
   bootTime: 50
 
-  # Schedule (experimental): Use a cron expression to control exactly when
-  # updates run. When set, this overrides both interval and bootTime.
+  # 固定時間更新。優先順序：cron > times > interval。
+  # 使用 interval 時，請將 times 設為 [] 並清空 cron。
   # Examples:
   #   Every day at 03:30: "30 3 * * *"
   #   Every 15 minutes:   "*/15 * * * *"
   #   At 5 past every hour on weekdays: "5 * * * 1-5"
   schedule:
+    enabled: true
+    times: ["04:00"] # 每天可設定多個 HH:mm 時刻，例如 ["04:00", "16:00"]
     cron: ""         # Cron expression (UNIX 5-field). Leave blank to disable.
-    timezone: "UTC"  # Timezone for the cron schedule, e.g. "America/New_York"
+    timezone: "Asia/Taipei"
 
   # Optional GitHub personal access token (PAT). Strongly recommended if you use
   # many GitHub links to avoid API rate-limits when listing releases/artifacts.
@@ -58,6 +60,8 @@ proxy:
 # Behavior toggles
 behavior:
   useUpdateFolder: true
+  # 缺少／已刪除的插件不會被自動裝回；刻意安裝新插件時使用 ?installMissing=true。
+  installMissing: false
   # Check for updates without installing them automatically.
   # Scheduled runs still check every updates.interval after updates.bootTime.
   # Entries with ?auto=true still install during scheduled manual-mode runs.
@@ -94,6 +98,11 @@ behavior:
   # Entries where timeToRestart > restartDelaySec are skipped.
   # Placeholders: {delay}, {seconds}, {timeToRestart}, {totalDelay}, {totalSeconds}
   restartCommands: [ ]
+
+discovery:
+  # 排程執行前上網辨識已安裝插件的來源；保留現有設定及停用項目。
+  # 使用檔案雜湊精確比對或插件內的官方專案網址；名稱搜尋僅列出候選。
+  autoAdd: true
 
 # Lightweight provider metadata cache. Provider metadata is still checked each
 # run; unchanged artifacts skip the large payload download.

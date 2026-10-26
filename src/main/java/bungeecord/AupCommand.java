@@ -49,6 +49,13 @@ public class AupCommand extends Command implements TabExecutor {
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
         switch (sub) {
+            case "schedule":
+                sender.sendMessage(common.ScheduleCommandSupport.execute(Arrays.copyOfRange(args, 1, args.length), cfgMgr, reloadAction));
+                break;
+            case "discover":
+                common.DiscoveryCommandSupport.execute(Arrays.copyOfRange(args, 1, args.length), pluginUpdater,
+                        listFile, completionDispatcher, message -> sender.sendMessage(message));
+                break;
             case "download":
             case "update":
                 install(sender, Arrays.copyOfRange(args, 1, args.length));
@@ -116,6 +123,8 @@ public class AupCommand extends Command implements TabExecutor {
     }
 
     private void sendHelp(CommandSender sender) {
+        sender.sendMessage(ChatColor.AQUA + "/baup schedule daily 04:00 16:00 | timezone Asia/Taipei | off | status");
+        sender.sendMessage(ChatColor.AQUA + "/baup discover [apply] - 自動尋找更新來源（預覽／儲存）");
         sender.sendMessage(ChatColor.AQUA + "AutoUpdatePlugins Commands:");
         sender.sendMessage(ChatColor.AQUA + "/baup update [plugin|group...]" + ChatColor.GRAY + " - Install specific or all plugins");
         sender.sendMessage(ChatColor.AQUA + "/baup check [plugin|group...]" + ChatColor.GRAY + " - Check for updates without installing");
@@ -518,7 +527,7 @@ public class AupCommand extends Command implements TabExecutor {
         if (!sender.hasPermission("autoupdateplugins.manage")) {
             return completions;
         }
-        String[] subs = {"download", "update", "check", "pending", "log", "stop", "reload", "add", "remove", "list", "enable", "disable", "debug"};
+        String[] subs = {"schedule", "discover", "download", "update", "check", "pending", "log", "stop", "reload", "add", "remove", "list", "enable", "disable", "debug"};
         if (args.length == 1) {
             String current = args[0].toLowerCase(Locale.ROOT);
             for (String sub : subs) {

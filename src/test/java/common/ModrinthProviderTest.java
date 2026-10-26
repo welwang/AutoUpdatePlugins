@@ -145,6 +145,18 @@ public class ModrinthProviderTest {
         provider().resolve("Example", options("get=["), new ServerEnvironment("paper", "1.21.8"));
     }
 
+    @Test
+    public void geyserExtensionPathSelectsNewGeyserBuildRatherThanOldVelocityBuild() throws Exception {
+        String current = version("current", "2.0.1", "geyser", "1.21.8", "new.jar", true)
+                .replace("\"release\"", "\"alpha\"");
+        String old = version("old", "1.0.4", "velocity", "1.21.8", "old.jar", true);
+        server.json(versions(current, old));
+        EntryOptions entry = EntryOptions.parse("https://modrinth.com/plugin/boar?latest=true | updatePath=plugins/Geyser-Velocity/extensions/update", null);
+        assertEquals("current", provider().resolve("Boar", entry, new ServerEnvironment("velocity", "1.21.8")).versionId);
+        EntryOptions explicit = EntryOptions.parse("https://modrinth.com/plugin/boar?latest=true&loader=velocity | updatePath=plugins/Geyser-Velocity/extensions/update", null);
+        assertEquals("old", provider().resolve("Boar", explicit, new ServerEnvironment("velocity", "1.21.8")).versionId);
+    }
+
     private ModrinthProvider provider() {
         return new ModrinthProvider(server.url("/v2"));
     }

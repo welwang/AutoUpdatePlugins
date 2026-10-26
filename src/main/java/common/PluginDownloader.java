@@ -242,6 +242,11 @@ public class PluginDownloader {
         return paths.livePath != null ? paths.livePath : paths.targetPath;
     }
 
+    boolean hasInstalledPlugin(String fileName, String customPath) {
+        InstallPaths paths = resolveInstallPaths(fileName, customPath);
+        return paths.livePath != null && Files.isRegularFile(paths.livePath);
+    }
+
     public TransferOutcome transferRemotePluginDetailed(String link,
                                                          String fileName,
                                                          String githubToken,
@@ -720,6 +725,19 @@ public class PluginDownloader {
         transferCandidate.set(candidate);
 
         File target = new File(outputFilePath);
+        Path identityPath = livePathOverride == null ? target.toPath() : Paths.get(livePathOverride);
+        if (!Files.isRegularFile(identityPath)) identityPath = target.toPath();
+        Set<String> installedIds = readPluginIdentifiers(identityPath);
+        Set<String> incomingIds = readPluginIdentifiers(outTmp.toPath());
+        if (!installedIds.isEmpty() && !incomingIds.isEmpty()
+                && Collections.disjoint(installedIds, incomingIds)) {
+            transferBlockReason.set("Downloaded plugin identity does not match installed plugin: "
+                    + installedIds + " -> " + incomingIds);
+            logger.warning(transferBlockReason.get());
+            cleanupQuietly(outTmp);
+            cleanupQuietly(rawTmp);
+            return TransferResult.BLOCKED;
+        }
         if (entryOptions != null && !entryOptions.bool("force", false)) {
             Path live = null;
             try {
@@ -839,6 +857,7 @@ public class PluginDownloader {
         Path liveTarget = matchedLiveJar != null ? matchedLiveJar : exactLiveJar;
         boolean useUpdateFolder = (customUseUpdateFolder != null)
                 ? customUseUpdateFolder.booleanValue()
+                : customUpdatePath != null ? true
                 : (customFilePath != null && !customFilePath.isEmpty()
                 ? false
                 : UpdateOptions.useUpdateFolder);
@@ -870,7 +889,9 @@ public class PluginDownloader {
         }
         try (JarFile jar = new JarFile(jarPath.toFile())) {
             addYamlIdentifier(jar, "plugin.yml", identifiers);
+            addYamlIdentifier(jar, "paper-plugin.yml", identifiers);
             addYamlIdentifier(jar, "bungee.yml", identifiers);
+            addYamlIdentifier(jar, "extension.yml", identifiers);
             addVelocityIdentifiers(jar, identifiers);
         } catch (IOException ignored) {
         }
@@ -2049,6 +2070,7 @@ public class PluginDownloader {
             return jf.getEntry("plugin.yml") != null
                     || jf.getEntry("paper-plugin.yml") != null
                     || jf.getEntry("bungee.yml") != null
+                    || jf.getEntry("extension.yml") != null
                     || jf.getEntry("velocity-plugin.json") != null;
         } catch (IOException ignored) {
             return false;

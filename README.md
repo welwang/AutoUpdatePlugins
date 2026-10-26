@@ -1,3 +1,9 @@
+**繁體中文客製版 12.3.0-tw.1**：每日固定時間（預設台北 04:00）、手動更新、智慧來源辨識與問題修正。
+
+**[繁體中文安裝與指令說明](README.zh-TW.md)** · **[評論及 Issues 處理紀錄](FEEDBACK.zh-TW.md)**
+
+This fork defaults to daily updates at 04:00 Asia/Taipei, skips missing plugins, and discovers sources from installed file hashes or embedded project URLs. The original upstream documentation follows; use the Chinese guide for this fork's defaults.
+
 <div align="center">
 
 # **AutoUpdatePlugins v12.3.0**

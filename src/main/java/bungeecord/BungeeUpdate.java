@@ -30,6 +30,7 @@ public final class BungeeUpdate extends Plugin {
     private ConfigManager cfgMgr;
     private RollbackMonitor rollbackMonitor;
     private final AtomicBoolean restartScheduled = new AtomicBoolean(false);
+    private final common.UpdateSchedule updateSchedule = new common.UpdateSchedule();
 
     @Override
     public void onEnable() {
@@ -61,10 +62,10 @@ public final class BungeeUpdate extends Plugin {
                 }
                 created = file.createNewFile();
             }
-            if (created || file.length() == 0) {
+            if (created) {
                 String example = "# Map plugin name to its update source URL\n"
                         + "# Example entry:\n"
-                        + "AutoUpdatePlugins: \"https://github.com/NewAmazingPVP/AutoUpdatePlugins\"\n";
+                        + "# Use the discover apply command to find installed plugins, or add entries with the add command.\n";
 
                 Path filePath = file.toPath();
                 Files.write(filePath, example.getBytes(StandardCharsets.UTF_8));
@@ -84,40 +85,17 @@ public final class BungeeUpdate extends Plugin {
         applyBehaviorConfig();
         UpdateOptions.useUpdateFolder = cfgMgr.getBoolean("behavior.useUpdateFolder");
         pluginUpdater.reloadPersistence();
+        periodUpdatePlugins();
         configureRollback();
         getLogger().info("AutoUpdatePlugins configuration reloaded.");
     }
 
     public void periodUpdatePlugins() {
-        String cronExpression = cfgMgr.getString("updates.schedule.cron");
-
-        boolean scheduled = false;
-        if (cronExpression != null && !cronExpression.isEmpty()) {
-            String tz = cfgMgr.getString("updates.schedule.timezone");
-            scheduled = CronScheduler.scheduleRecurring(
-                    cronExpression,
-                    tz,
-                    (delay, task) -> getProxy().getScheduler().schedule(this, task, delay, TimeUnit.SECONDS),
-                    getLogger(),
-                    () -> getProxy().getScheduler().runAsync(this, this::runConfiguredUpdateWithRestart)
-            );
-        }
-        if (!scheduled) {
-            scheduleIntervalUpdates();
-        }
-    }
-
-    private void scheduleIntervalUpdates() {
-        int interval = cfgMgr.getInt("updates.interval");
-        long bootTime = cfgMgr.getInt("updates.bootTime");
-        long periodSeconds = 60L * interval;
-        getProxy().getScheduler().schedule(this,
-                () -> getProxy().getScheduler().runAsync(this, this::runConfiguredUpdateWithRestart),
-                bootTime, periodSeconds, TimeUnit.SECONDS);
-        getLogger().info("Scheduled updates with interval: " + interval + " minutes (First run in " + bootTime + " seconds)");
+        updateSchedule.configure(cfgMgr, getLogger(), this::runConfiguredUpdateWithRestart);
     }
 
     private void runConfiguredUpdateWithRestart() {
+        if (UpdateOptions.manualMode && cfgMgr.getBoolean("discovery.autoAdd")) pluginUpdater.discoverSources(myFile, true);
         if (UpdateOptions.manualMode) {
             runManualModeSchedule();
             return;
@@ -154,7 +132,7 @@ public final class BungeeUpdate extends Plugin {
     }
 
     private void runInstallAllWithRestart() {
-        pluginUpdater.updateList(myFile, "waterfall", cfgMgr.getString("updates.key"), this::handleScheduledUpdateCompletion);
+        pluginUpdater.updateListWithDiscovery(myFile, "waterfall", cfgMgr.getString("updates.key"), cfgMgr.getBoolean("discovery.autoAdd"), this::handleScheduledUpdateCompletion);
     }
 
     private void handleScheduledUpdateCompletion(boolean anyUpdated) {
@@ -434,6 +412,7 @@ public final class BungeeUpdate extends Plugin {
             UpdateOptions.allowPreReleaseDefault = cfgMgr.getBoolean("behavior.allowPreRelease");
             UpdateOptions.useUpdateFolder = cfgMgr.getBoolean("behavior.useUpdateFolder");
             UpdateOptions.manualMode = cfgMgr.getBoolean("behavior.manualMode");
+            UpdateOptions.installMissing = cfgMgr.getBoolean("behavior.installMissing");
             UpdateOptions.debug = cfgMgr.getBoolean("behavior.debug");
             UpdateOptions.restartAfterUpdate = cfgMgr.getBoolean("behavior.restartAfterUpdate");
             UpdateOptions.restartDelaySec = Math.max(0, cfgMgr.getInt("behavior.restartDelaySec"));
@@ -568,7 +547,11 @@ public final class BungeeUpdate extends Plugin {
         cfgMgr.addDefault("updates.interval", 120, "Time between plugin updates in minutes");
         cfgMgr.addDefault("updates.bootTime", 50, "Delay in seconds after server startup before updating");
         cfgMgr.addDefault("updates.schedule.cron", "", "Experimental: A cron expression to schedule updates. Overrides interval and bootTime if set.");
-        cfgMgr.addDefault("updates.schedule.timezone", "UTC", "The timezone for the cron schedule.");
+        cfgMgr.addDefault("updates.schedule.timezone", "Asia/Taipei", "Timezone for daily times and cron.");
+        cfgMgr.addDefault("updates.schedule.enabled", true, "Enable automatic updates; manual commands work when false.");
+        cfgMgr.addDefault("updates.schedule.times", java.util.Arrays.asList("04:00"), "Daily HH:mm times. Clear this list for interval mode; cron takes priority.");
+        cfgMgr.addDefault("behavior.installMissing", false, "Skip absent plugins. Use ?installMissing=true for intentional new installs.");
+        cfgMgr.addDefault("discovery.autoAdd", true, "Discover installed plugins through exact Modrinth file hashes or embedded official source URLs.");
         cfgMgr.addDefault("updates.key", "", "GitHub token for Actions/authenticated requests (optional)");
         cfgMgr.addDefault("updates.githubTokens", new LinkedHashMap<String, String>(), "Optional named GitHub tokens. Select one per entry with ?account=name.");
         cfgMgr.addDefault("updates.gitlabTokens", new LinkedHashMap<String, String>(), "Optional named GitLab PRIVATE-TOKEN values. Select one per entry with ?account=name.");
@@ -679,6 +662,8 @@ public final class BungeeUpdate extends Plugin {
 
     @Override
     public void onDisable() {
+        updateSchedule.close();
+        if (pluginUpdater != null) pluginUpdater.close();
         RollbackManager.setRollbackListener(null);
         if (rollbackMonitor != null) {
             rollbackMonitor.detach();

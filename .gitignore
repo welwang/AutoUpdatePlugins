@@ -27,5 +27,8 @@ replay_pid*
 *.iml
 *.patch
 target/
+.tools/
+research/
+dist/
 src/main/java/common/PluginUpdater.java~
 

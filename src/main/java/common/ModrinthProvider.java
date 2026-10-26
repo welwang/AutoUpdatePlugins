@@ -29,7 +29,10 @@ final class ModrinthProvider {
         String project = projectSlug(options.sourceWithoutQuery);
         if (project == null) throw new IOException("Invalid Modrinth project URL");
 
-        String loader = first(options.first("loader", "platform"), environment == null ? null : environment.platform);
+        String hint = options.customPath();
+        String inferred = hint != null && Pattern.compile("(?i)(?:^|[\\\\/])geyser[^\\\\/]*[\\\\/]extensions(?:[\\\\/]|$)")
+                .matcher(hint).find() ? "geyser" : environment == null ? null : environment.platform;
+        String loader = first(options.first("loader", "platform"), inferred);
         String minecraftVersion = first(options.first("mcVersion", "gameVersion", "minecraftVersion"),
                 environment == null ? null : environment.minecraftVersion);
         boolean versionCheck = options.has("versionCheck")

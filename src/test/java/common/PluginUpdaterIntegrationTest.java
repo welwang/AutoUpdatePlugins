@@ -177,6 +177,34 @@ public class PluginUpdaterIntegrationTest {
     }
 
     @Test
+    public void absentPluginsAreSkippedBeforeNetworkUnlessExplicitlyAllowed() throws Exception {
+        UpdateOptions.installMissing = false;
+        server.release("1.1.0", pluginJar("1.1.0"));
+        PluginUpdater updater = updater();
+        assertFalse(runInstall(updater, SOURCE));
+        assertEquals(0, server.metadataHits.get());
+        assertEquals(0, server.payloadHits.get());
+        assertFalse(Files.exists(installedJar));
+        assertTrue(runInstall(updater, SOURCE + "?installMissing=true"));
+        assertTrue(Files.exists(installedJar));
+    }
+
+    @Test
+    public void wrongPluginFromProviderCannotReplaceInstalledPluginEvenWhenForced() throws Exception {
+        byte[] original = pluginJar("1.0.0");
+        Files.write(installedJar, original);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(bytes)) {
+            jar.putNextEntry(new JarEntry("plugin.yml"));
+            jar.write("name: WrongPlugin\nversion: 2.0.0\nmain: wrong.Plugin\n".getBytes(StandardCharsets.UTF_8));
+            jar.closeEntry();
+        }
+        server.release("2.0.0", bytes.toByteArray());
+        assertFalse(runInstall(updater(), SOURCE + "?force=true"));
+        assertArrayEquals(original, Files.readAllBytes(installedJar));
+    }
+
+    @Test
     public void checkModeRecordsAvailablePendingUpdateWithoutChangingFiles() throws Exception {
         byte[] version100 = pluginJar("1.0.0");
         Files.write(installedJar, version100);

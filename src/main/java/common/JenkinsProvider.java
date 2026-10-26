@@ -69,7 +69,14 @@ public final class JenkinsProvider {
         String tree = "number,id,timestamp,displayName,fullDisplayName,description,"
                 + "artifacts[fileName,relativePath,size,length],changeSet[items[msg]]";
         String apiUrl = job.jobRoot + "lastSuccessfulBuild/api/json?tree=" + encodeQuery(tree);
-        JsonNode build = getJson(apiUrl, job.jobRoot, authorization);
+        JsonNode build;
+        try {
+            build = getJson(apiUrl, job.jobRoot, authorization);
+        } catch (ApiStatusException unavailable) {
+            // Some Maven-project Jenkins instances (including Citizens) expose HTML but disable the JSON API.
+            if (unavailable.status != 404 && unavailable.status != 405) throw unavailable;
+            build = getHtmlBuild(job.jobRoot, authorization);
+        }
         JsonNode artifacts = build.path("artifacts");
         if (!artifacts.isArray()) {
             throw new IOException("Jenkins returned no artifact list for " + job.jobRoot);
@@ -152,7 +159,7 @@ public final class JenkinsProvider {
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
                 closeQuietly(connection.getErrorStream());
-                throw new IOException("Jenkins API returned HTTP " + status + " for " + safeJobRoot);
+                throw new ApiStatusException(status, safeJobRoot);
             }
             JsonNode body;
             try (InputStream input = connection.getInputStream()) {
@@ -164,6 +171,55 @@ public final class JenkinsProvider {
             return body;
         } finally {
             connection.disconnect();
+        }
+    }
+
+    private static JsonNode getHtmlBuild(String jobRoot, String authorization) throws IOException {
+        String pageUrl = jobRoot + "lastSuccessfulBuild/";
+        HttpURLConnection connection = (HttpURLConnection) new URL(pageUrl).openConnection();
+        connection.setInstanceFollowRedirects(false);
+        connection.setConnectTimeout(Math.max(1000, UpdateOptions.connectTimeoutMs));
+        connection.setReadTimeout(Math.max(1000, UpdateOptions.readTimeoutMs));
+        connection.setRequestProperty("User-Agent", "AutoUpdatePlugins");
+        if (authorization != null) connection.setRequestProperty("Authorization", authorization);
+        try {
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) throw new ApiStatusException(status, jobRoot);
+            org.jsoup.nodes.Document page;
+            try (InputStream input = connection.getInputStream()) {
+                page = org.jsoup.Jsoup.parse(input, "UTF-8", pageUrl);
+            }
+            Matcher number = Pattern.compile("#([0-9]+)").matcher(page.select("h1").text());
+            if (!number.find()) throw new IOException("Jenkins HTML has no successful build number for " + jobRoot);
+            com.fasterxml.jackson.databind.node.ObjectNode build = JSON.createObjectNode();
+            build.put("number", number.group(1));
+            com.fasterxml.jackson.databind.node.ArrayNode artifacts = build.putArray("artifacts");
+            java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+            for (org.jsoup.nodes.Element link : page.select("a[href]")) {
+                String href = link.absUrl("href");
+                // Restrict both origin and job. Never turn a page's external link into an authenticated payload.
+                String marker = pageUrl + "artifact/";
+                String numbered = jobRoot + number.group(1) + "/artifact/";
+                String relative = href.startsWith(marker) ? href.substring(marker.length())
+                        : href.startsWith(numbered) ? href.substring(numbered.length()) : null;
+                if (relative == null || !relative.toLowerCase(Locale.ROOT).endsWith(".jar")) continue;
+                List<String> segments = splitPath(relative);
+                String path = decodeRelativePath(segments, 0);
+                if (path == null || !seen.add(path)) continue;
+                com.fasterxml.jackson.databind.node.ObjectNode artifact = artifacts.addObject();
+                artifact.put("relativePath", path);
+                artifact.put("fileName", path.substring(path.lastIndexOf('/') + 1));
+            }
+            if (artifacts.size() == 0) throw new IOException("Jenkins HTML has no JAR artifacts for " + jobRoot);
+            return build;
+        } finally { connection.disconnect(); }
+    }
+
+    private static final class ApiStatusException extends IOException {
+        final int status;
+        ApiStatusException(int status, String jobRoot) {
+            super("Jenkins returned HTTP " + status + " for " + jobRoot);
+            this.status = status;
         }
     }
 

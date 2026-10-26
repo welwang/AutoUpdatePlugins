@@ -30,6 +30,8 @@ public class UpdateOptions {
     public static List<String> userAgents = new ArrayList<>();
     public static boolean useUpdateFolder = true;
     public static boolean manualMode = false;
+    // Platform startup applies the safer config default (false). Keep the standalone API compatible.
+    public static boolean installMissing = true;
     public static int maxPerHost = 3;
     public static final ConcurrentHashMap<String, Semaphore> hostSemaphores = new ConcurrentHashMap<>();
     public static boolean rollbackEnabled = false;

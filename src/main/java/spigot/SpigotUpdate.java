@@ -40,6 +40,7 @@ public final class SpigotUpdate extends JavaPlugin {
     private RollbackMonitor rollbackMonitor;
     private AupGui aupGui;
     private final AtomicBoolean restartScheduled = new AtomicBoolean(false);
+    private final common.UpdateSchedule updateSchedule = new common.UpdateSchedule();
 
     @Override
     public void onEnable() {
@@ -77,10 +78,10 @@ public final class SpigotUpdate extends JavaPlugin {
                 }
                 created = file.createNewFile();
             }
-            if (created || file.length() == 0) {
+            if (created) {
                 String example = "# Map plugin name to its update source URL\n"
                         + "# Example entry:\n"
-                        + "AutoUpdatePlugins: \"https://github.com/NewAmazingPVP/AutoUpdatePlugins\"\n";
+                        + "# Use the discover apply command to find installed plugins, or add entries with the add command.\n";
 
                 Path filePath = file.toPath();
                 Files.write(filePath, example.getBytes(StandardCharsets.UTF_8));
@@ -103,6 +104,7 @@ public final class SpigotUpdate extends JavaPlugin {
         applyHttpConfig();
         applyBehaviorConfig();
         pluginUpdater.reloadPersistence();
+        periodUpdatePlugins();
         configureRollback();
         getLogger().info("AutoUpdatePlugins configuration reloaded.");
     }
@@ -135,29 +137,11 @@ public final class SpigotUpdate extends JavaPlugin {
     }
 
     public void periodUpdatePlugins() {
-        String cronExpression = cfgMgr.getString("updates.schedule.cron");
-        SchedulerAdapter sched = new SchedulerAdapter(this);
-        Runnable job = this::runConfiguredUpdateWithRestart;
-
-        boolean scheduled = false;
-        if (cronExpression != null && !cronExpression.isEmpty()) {
-            String tz = cfgMgr.getString("updates.schedule.timezone");
-            scheduled = CronScheduler.scheduleRecurring(cronExpression, tz, sched::runDelayedAsync, getLogger(), job);
-        }
-        if (!scheduled) {
-            scheduleIntervalUpdates();
-        }
-    }
-
-    private void scheduleIntervalUpdates() {
-        int interval = cfgMgr.getInt("updates.interval");
-        long bootTime = cfgMgr.getInt("updates.bootTime");
-        SchedulerAdapter sched = new SchedulerAdapter(this);
-        sched.runRepeatingAsync(bootTime, 60L * interval, this::runConfiguredUpdateWithRestart);
-        getLogger().info("Scheduled updates with interval: " + interval + " minutes (First run in " + bootTime + " seconds)");
+        updateSchedule.configure(cfgMgr, getLogger(), this::runConfiguredUpdateWithRestart);
     }
 
     private void runConfiguredUpdateWithRestart() {
+        if (UpdateOptions.manualMode && cfgMgr.getBoolean("discovery.autoAdd")) pluginUpdater.discoverSources(myFile, true);
         if (UpdateOptions.manualMode) {
             runManualModeSchedule();
             return;
@@ -195,7 +179,7 @@ public final class SpigotUpdate extends JavaPlugin {
     }
 
     private void runInstallAllWithRestart() {
-        pluginUpdater.updateList(myFile, serverPlatform(), cfgMgr.getString("updates.key"), this::handleScheduledUpdateCompletion);
+        pluginUpdater.updateListWithDiscovery(myFile, serverPlatform(), cfgMgr.getString("updates.key"), cfgMgr.getBoolean("discovery.autoAdd"), this::handleScheduledUpdateCompletion);
     }
 
     private void handleScheduledUpdateCompletion(boolean anyUpdated) {
@@ -407,6 +391,7 @@ public final class SpigotUpdate extends JavaPlugin {
             UpdateOptions.allowPreReleaseDefault = config.getBoolean("behavior.allowPreRelease");
             UpdateOptions.useUpdateFolder = config.getBoolean("behavior.useUpdateFolder");
             UpdateOptions.manualMode = config.getBoolean("behavior.manualMode");
+            UpdateOptions.installMissing = cfgMgr.getBoolean("behavior.installMissing");
             UpdateOptions.debug = config.getBoolean("behavior.debug");
             UpdateOptions.restartAfterUpdate = config.getBoolean("behavior.restartAfterUpdate");
             UpdateOptions.restartDelaySec = Math.max(0, config.getInt("behavior.restartDelaySec"));
@@ -533,6 +518,8 @@ public final class SpigotUpdate extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        updateSchedule.close();
+        if (pluginUpdater != null) pluginUpdater.close();
         if (aupGui != null) {
             aupGui.close();
             aupGui = null;
@@ -608,7 +595,11 @@ public final class SpigotUpdate extends JavaPlugin {
         cfgMgr.addDefault("updates.interval", 120, "Time between plugin updates in minutes");
         cfgMgr.addDefault("updates.bootTime", 50, "Delay in seconds after server startup before updating");
         cfgMgr.addDefault("updates.schedule.cron", "", "Experimental: A cron expression to schedule updates. Overrides interval and bootTime if set.");
-        cfgMgr.addDefault("updates.schedule.timezone", "UTC", "The timezone for the cron schedule.");
+        cfgMgr.addDefault("updates.schedule.timezone", "Asia/Taipei", "Timezone for daily times and cron.");
+        cfgMgr.addDefault("updates.schedule.enabled", true, "Enable automatic updates; manual commands work when false.");
+        cfgMgr.addDefault("updates.schedule.times", java.util.Arrays.asList("04:00"), "Daily HH:mm times. Clear this list for interval mode; cron takes priority.");
+        cfgMgr.addDefault("behavior.installMissing", false, "Skip absent plugins. Use ?installMissing=true for intentional new installs.");
+        cfgMgr.addDefault("discovery.autoAdd", true, "Discover installed plugins through exact Modrinth file hashes or embedded official source URLs.");
         cfgMgr.addDefault("updates.key", "", "GitHub token for Actions/authenticated requests (optional)");
         cfgMgr.addDefault("updates.githubTokens", new LinkedHashMap<String, String>(), "Optional named GitHub tokens. Select one per entry with ?account=name.");
         cfgMgr.addDefault("updates.gitlabTokens", new LinkedHashMap<String, String>(), "Optional named GitLab PRIVATE-TOKEN values. Select one per entry with ?account=name.");

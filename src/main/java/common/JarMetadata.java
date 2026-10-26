@@ -45,7 +45,9 @@ public final class JarMetadata {
         String version = null;
         try (JarFile file = new JarFile(jar.toFile())) {
             Metadata values = readYaml(file, "plugin.yml");
+            if (values == null) values = readYaml(file, "paper-plugin.yml");
             if (values == null) values = readYaml(file, "bungee.yml");
+            if (values == null) values = readYaml(file, "extension.yml");
             if (values != null) {
                 name = values.name;
                 version = values.version;
